@@ -435,6 +435,19 @@ async def api_save_lesson(request: web.Request):
     with open(schedule_file, "r", encoding="utf-8") as f:
         schedule_data = json.load(f)
 
+    # First find if lesson existed previously to preserve its cancelledWeeks
+    existing_cancelled_weeks = []
+    for day in schedule_data["days"]:
+        for l in day["lessons"]:
+            if l.get("id") == lesson_id:
+                existing_cancelled_weeks = l.get("cancelledWeeks", [])
+                break
+
+    cancelled_weeks = data.get("cancelledWeeks")
+    if cancelled_weeks is None:
+        cancelled_weeks = existing_cancelled_weeks
+    lesson_obj["cancelledWeeks"] = cancelled_weeks
+
     # First remove lesson if it existed anywhere
     for day in schedule_data["days"]:
         day["lessons"] = [l for l in day["lessons"] if l.get("id") != lesson_id]
@@ -452,6 +465,70 @@ async def api_save_lesson(request: web.Request):
         json.dump(schedule_data, f, ensure_ascii=False, indent=2)
 
     return web.json_response({"success": True, "lesson": lesson_obj})
+
+
+async def api_toggle_cancel_lesson(request: web.Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    if not check_admin_password(request, data):
+        return web.json_response({"error": "Требуется пароль старосты / редактора для отмены пары"}, status=403)
+
+    schedule_file = DATA_DIR / "schedule.json"
+    if not schedule_file.exists():
+        return web.json_response({"error": "Файл расписания не найден"}, status=404)
+
+    lesson_id = request.match_info.get("id")
+    if not lesson_id:
+        return web.json_response({"error": "ID пары не указан"}, status=400)
+
+    week = data.get("week")
+    cancelled = data.get("cancelled", True)
+
+    if week is None:
+        return web.json_response({"error": "Номер недели обязателен"}, status=400)
+
+    try:
+        week = int(week)
+    except ValueError:
+        return web.json_response({"error": "Неверный формат недели"}, status=400)
+
+    with open(schedule_file, "r", encoding="utf-8") as f:
+        schedule_data = json.load(f)
+
+    target_lesson = None
+    for day in schedule_data["days"]:
+        for l in day["lessons"]:
+            if l.get("id") == lesson_id:
+                target_lesson = l
+                break
+        if target_lesson:
+            break
+
+    if not target_lesson:
+        return web.json_response({"error": "Занятие с таким ID не найдено"}, status=404)
+
+    cancelled_weeks = set(target_lesson.get("cancelledWeeks") or [])
+    if cancelled:
+        cancelled_weeks.add(week)
+    else:
+        cancelled_weeks.discard(week)
+
+    target_lesson["cancelledWeeks"] = sorted(list(cancelled_weeks))
+
+    with open(schedule_file, "w", encoding="utf-8") as f:
+        json.dump(schedule_data, f, ensure_ascii=False, indent=2)
+
+    return web.json_response({
+        "success": True,
+        "lessonId": lesson_id,
+        "week": week,
+        "cancelled": (week in cancelled_weeks),
+        "cancelledWeeks": target_lesson["cancelledWeeks"]
+    })
+
 
 
 async def api_delete_lesson(request: web.Request):
@@ -668,6 +745,46 @@ async def index_handler(request: web.Request):
     return web.FileResponse(STATIC_DIR / "index.html")
 
 
+async def sw_handler(request: web.Request):
+    sw_file = STATIC_DIR / "sw.js"
+    if not sw_file.exists():
+        return web.Response(text="// Service Worker not found", content_type="application/javascript", status=404)
+    return web.FileResponse(
+        sw_file,
+        headers={
+            "Content-Type": "application/javascript; charset=utf-8",
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
+    )
+
+
+async def manifest_handler(request: web.Request):
+    manifest_file = STATIC_DIR / "manifest.json"
+    if not manifest_file.exists():
+        return web.Response(text="{}", content_type="application/manifest+json", status=404)
+    return web.FileResponse(
+        manifest_file,
+        headers={
+            "Content-Type": "application/manifest+json; charset=utf-8",
+            "Cache-Control": "public, max-age=86400"
+        }
+    )
+
+
+async def favicon_handler(request: web.Request):
+    favicon_file = STATIC_DIR / "favicon.svg"
+    if not favicon_file.exists():
+        return web.Response(status=404)
+    return web.FileResponse(
+        favicon_file,
+        headers={
+            "Content-Type": "image/svg+xml",
+            "Cache-Control": "public, max-age=604800"
+        }
+    )
+
+
 def create_app():
     init_db()
     app = web.Application()
@@ -681,6 +798,7 @@ def create_app():
 
     app.router.add_get("/api/schedule", api_get_schedule)
     app.router.add_post("/api/schedule/lesson", api_save_lesson)
+    app.router.add_post("/api/schedule/lesson/{id}/cancel", api_toggle_cancel_lesson)
     app.router.add_delete("/api/schedule/lesson/{id}", api_delete_lesson)
     app.router.add_post("/api/schedule/reset", api_reset_schedule)
     app.router.add_get("/api/students", api_get_students)
@@ -694,6 +812,11 @@ def create_app():
 
     app.router.add_get("/api/notes", api_get_notes)
     app.router.add_post("/api/notes", api_save_note)
+
+    # PWA Service Worker, Manifest & Favicon
+    app.router.add_get("/sw.js", sw_handler)
+    app.router.add_get("/manifest.json", manifest_handler)
+    app.router.add_get("/favicon.ico", favicon_handler)
 
     # Static assets
     app.router.add_get("/", index_handler)

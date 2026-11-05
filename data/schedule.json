@@ -463,7 +463,8 @@
           "room": "311/2",
           "address": "Плехановская ул., 11 (Корпус 2)",
           "subgroup": 0,
-          "weekType": "all"
+          "weekType": "all",
+          "cancelledWeeks": []
         },
         {
           "id": "fri-4-all-num",

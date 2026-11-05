@@ -49,13 +49,17 @@ const AdminAuth = {
   password: '',
   pendingCallback: null,
 
-  async init() {
+  initSync() {
     this.password = localStorage.getItem('btii_admin_password') || '';
+    this.isUnlocked = Boolean(this.password);
     this.bindEvents();
+    this.updateUI();
+  },
+
+  async init() {
+    this.initSync();
     if (this.password) {
       await this.verifySavedPassword();
-    } else {
-      this.updateUI();
     }
   },
 
@@ -92,14 +96,15 @@ const AdminAuth = {
     const btn = document.getElementById('editorModeBtn');
     const btnText = document.getElementById('editorModeBtnText');
     if (!btn) return;
+    btn.style.display = 'none';
 
     if (this.isUnlocked) {
       btn.classList.add('active');
-      btn.title = 'Режим редактора ВКЛЮЧЕН (нажмите, чтобы выйти)';
+      btn.title = 'Режим редактора ВКЛЮЧЕН';
       if (btnText) btnText.textContent = 'Редактор: ВКЛ 🔓';
     } else {
       btn.classList.remove('active');
-      btn.title = 'Режим редактирования расписания и ДЗ (нажмите для ввода пароля)';
+      btn.title = 'Режим редактора';
       if (btnText) btnText.textContent = 'Редактор: 🔒';
     }
   },
@@ -149,6 +154,37 @@ const AdminAuth = {
         }
       });
     }
+
+    // Discreet shortcut: Ctrl+Shift+E or triple click on logo
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'E' || e.key === 'e' || e.key === 'У' || e.key === 'у')) {
+        e.preventDefault();
+        if (this.isUnlocked) {
+          if (confirm('Выйти из режима редактора?')) this.lock();
+        } else {
+          this.prompt();
+        }
+      }
+    });
+
+    let logoClicks = 0;
+    let logoTimer = null;
+    const brandLogo = document.getElementById('brandLogo');
+    brandLogo?.addEventListener('click', (e) => {
+      logoClicks++;
+      clearTimeout(logoTimer);
+      if (logoClicks >= 3) {
+        logoClicks = 0;
+        e.preventDefault();
+        if (this.isUnlocked) {
+          if (confirm('Выйти из режима редактора?')) this.lock();
+        } else {
+          this.prompt();
+        }
+      } else {
+        logoTimer = setTimeout(() => { logoClicks = 0; }, 600);
+      }
+    });
 
     const toggleVisBtn = document.getElementById('toggleAdminPasswordVisibility');
     const input = document.getElementById('adminPasswordInput');
@@ -204,43 +240,143 @@ const AdminAuth = {
 };
 
 const App = {
+  syncStatus: 'online',
+
   async init() {
     Theme.init();
+    this.initPWA();
     this.initTabs();
     this.initModals();
-    await AdminAuth.init();
-    await Auth.init();
-    await Schedule.init();
-    await Tasks.init();
+    this.initNetworkListeners();
+
+    // 1. Instant 0 ms Render from Local Storage & Caches
+    AdminAuth.initSync();
+    if (window.Auth) Auth.initSync();
+    if (window.Tasks) Tasks.initSync();
+    if (window.Schedule) Schedule.initSync();
     this.renderStudentsDirectory();
+
+    // 2. Non-blocking silent background synchronization with server
+    this.syncWithServer();
+  },
+
+  async syncWithServer() {
+    const promises = [];
+
+    if (window.Schedule) {
+      promises.push(Schedule.loadSchedule(true));
+    }
+    if (window.Tasks) {
+      promises.push(Tasks.loadTasks());
+      promises.push(Tasks.loadNotes());
+    }
+    if (window.Auth) {
+      promises.push(Auth.fetchStudents());
+      promises.push(Auth.checkAuth());
+    }
+    if (window.AdminAuth && AdminAuth.password) {
+      promises.push(AdminAuth.verifySavedPassword());
+    }
+
+    try {
+      await Promise.allSettled(promises);
+      this.renderStudentsDirectory();
+    } catch (e) {
+      console.warn('Background sync partial error', e);
+    }
+  },
+
+  initPWA() {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(reg => {
+            console.log('[PWA] Service Worker registered:', reg.scope);
+          })
+          .catch(err => {
+            console.warn('[PWA] SW registration failed:', err);
+          });
+      });
+    }
+  },
+
+  initNetworkListeners() {
+    window.addEventListener('online', () => {
+      this.updateSyncStatus('syncing', 'Восстановление сети...');
+      if (window.Schedule) Schedule.loadSchedule(true);
+      if (window.Tasks) Tasks.loadTasks();
+    });
+
+    window.addEventListener('offline', () => {
+      this.updateSyncStatus('offline', 'Офлайн-режим (из кеша)');
+      this.showToast('Нет подключения к сети. Работаем офлайн из кеша', 'info');
+    });
+  },
+
+  updateSyncStatus(status, text) {
+    this.syncStatus = status;
+    const badge = document.getElementById('syncStatusBadge');
+    const label = document.getElementById('syncStatusText');
+    if (!badge || !label) return;
+
+    badge.className = `sync-status-badge ${status}`;
+
+    if (text) {
+      label.textContent = text;
+    } else {
+      if (status === 'online') {
+        label.textContent = 'Данные актуальны';
+      } else if (status === 'syncing') {
+        label.textContent = 'Синхронизация...';
+      } else if (status === 'offline') {
+        label.textContent = 'Офлайн-режим (из кеша)';
+      } else if (status === 'cached') {
+        label.textContent = 'Показан кеш';
+      }
+    }
+  },
+
+  switchTab(targetId) {
+    // Switch active desktop tab button
+    document.querySelectorAll('.tab-btn').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === targetId);
+    });
+
+    // Switch active mobile bottom nav item
+    document.querySelectorAll('.bottom-nav-item').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === targetId);
+    });
+
+    // Switch visible tab panel
+    document.querySelectorAll('.tab-content').forEach(content => {
+      content.style.display = 'none';
+      content.classList.remove('active');
+    });
+
+    const targetContent = document.getElementById(`tab-${targetId}`);
+    if (targetContent) {
+      targetContent.style.display = 'block';
+      targetContent.classList.add('active');
+    }
+
+    // If tasks tab is opened, refresh tasks
+    if (targetId === 'tasks' && window.Tasks) {
+      Tasks.loadTasks();
+    }
   },
 
   initTabs() {
-    const tabs = document.querySelectorAll('.tab-btn');
-    tabs.forEach(tab => {
+    const desktopTabs = document.querySelectorAll('.tab-btn');
+    desktopTabs.forEach(tab => {
       tab.addEventListener('click', () => {
-        const targetId = tab.dataset.tab;
+        this.switchTab(tab.dataset.tab);
+      });
+    });
 
-        // Switch active tab button
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-
-        // Switch visible tab panel
-        document.querySelectorAll('.tab-content').forEach(content => {
-          content.style.display = 'none';
-          content.classList.remove('active');
-        });
-
-        const targetContent = document.getElementById(`tab-${targetId}`);
-        if (targetContent) {
-          targetContent.style.display = targetId === 'schedule' ? 'block' : 'block';
-          targetContent.classList.add('active');
-        }
-
-        // If tasks tab is opened, refresh tasks
-        if (targetId === 'tasks' && window.Tasks) {
-          Tasks.loadTasks();
-        }
+    const mobileTabs = document.querySelectorAll('.bottom-nav-item');
+    mobileTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        this.switchTab(tab.dataset.tab);
       });
     });
   },

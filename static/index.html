@@ -2,13 +2,29 @@
 <html lang="ru" data-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Расписание бТИИ-262</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0284c7">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="бТИИ-262">
+  <link rel="apple-touch-icon" href="/static/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css?v=3.0">
+  <script>
+    (function() {
+      try {
+        var saved = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved || (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch(e) {}
+    })();
+  </script>
 </head>
 <body>
   <div class="app-container">
@@ -48,12 +64,8 @@
           </svg>
         </button>
 
-        <!-- Editor Mode Lock / Unlock Button -->
-        <button id="editorModeBtn" class="btn btn-ghost" title="Режим редактирования расписания и ДЗ (нужен пароль)" style="font-size: 0.82rem; padding: 0.45rem 0.7rem; gap: 0.4rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
+        <!-- Editor Mode Lock / Unlock Button (Hidden by default) -->
+        <button id="editorModeBtn" class="btn btn-ghost" title="Режим редактора" style="display: none !important;">
           <span id="editorModeBtnText">Редактор: 🔒</span>
         </button>
 
@@ -77,9 +89,16 @@
         </div>
       </div>
 
-      <div class="quick-subgroup-pill">
-        <button class="subgroup-pill-btn active" data-subgroup="1">1 подгруппа</button>
-        <button class="subgroup-pill-btn" data-subgroup="2">2 подгруппа</button>
+      <div class="status-bar-right">
+        <div class="sync-status-badge" id="syncStatusBadge" title="Статус актуальности расписания">
+          <span class="sync-dot"></span>
+          <span class="sync-text" id="syncStatusText">Данные актуальны</span>
+        </div>
+
+        <div class="quick-subgroup-pill">
+          <button class="subgroup-pill-btn active" data-subgroup="1">1 подгруппа</button>
+          <button class="subgroup-pill-btn" data-subgroup="2">2 подгруппа</button>
+        </div>
       </div>
     </section>
 
@@ -128,44 +147,111 @@
 
     <!-- TAB 1: SCHEDULE -->
     <main id="tab-schedule" class="tab-content active">
+      <!-- Interactive Hero Widget «Сейчас / Следующая пара» -->
+      <section class="hero-widget" id="heroCurrentWidget" aria-label="Текущее и ближайшее занятие">
+        <div class="hero-widget-header">
+          <div class="hero-status-pill" id="heroStatusPill">
+            <span class="hero-status-dot"></span>
+            <span id="heroStatusLabel">Определение пары...</span>
+          </div>
+          <div class="hero-countdown-pill" id="heroCountdownPill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span id="heroCountdownText">Загрузка...</span>
+          </div>
+        </div>
+
+        <div class="hero-widget-body">
+          <div class="hero-info-main">
+            <div class="hero-badges-row">
+              <span class="badge" id="heroPairBadge">1 пара</span>
+              <span class="badge badge-lecture" id="heroTypeBadge">Лекция</span>
+              <span class="badge badge-subgroup" id="heroSubgroupBadge">1 подгруппа</span>
+              <span class="badge badge-campus" id="heroCampusBadge">ГК</span>
+            </div>
+            <h2 class="hero-subject-title" id="heroSubjectTitle">Загрузка расписания...</h2>
+
+            <div class="hero-meta-row">
+              <div class="hero-meta-item" id="heroTeacherMeta">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                <span id="heroTeacherName">--</span>
+              </div>
+              <div class="hero-meta-item" id="heroRoomMeta">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="9" y1="9" x2="15" y2="15"></line>
+                  <line x1="15" y1="9" x2="9" y2="15"></line>
+                </svg>
+                <span class="room-badge" id="heroRoomBadge">Ауд. --</span>
+              </div>
+              <div class="hero-meta-item hero-campus-tag" id="heroCampusMeta">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                  <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                <span id="heroCampusText">--</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="hero-progress-container" id="heroProgressContainer">
+          <div class="hero-progress-bar" id="heroProgressBar" style="width: 0%;"></div>
+        </div>
+      </section>
+
       <div class="toolbar-container">
-        <!-- Day chips -->
+        <!-- Day chips with dates -->
         <div class="days-scroll" id="daysScrollContainer">
           <button class="day-chip" data-day="today">
             <span class="day-short">СЕЙЧАС</span>
-            <span>Сегодня</span>
+            <span class="day-title-text">Сегодня</span>
+            <span class="day-date-sub" id="chip-date-today"></span>
           </button>
           <button class="day-chip active" data-day="1">
             <span class="day-short">ПН</span>
-            <span>Понедельник</span>
+            <span class="day-title-text">Понедельник</span>
+            <span class="day-date-sub" id="chip-date-1"></span>
           </button>
           <button class="day-chip" data-day="2">
             <span class="day-short">ВТ</span>
-            <span>Вторник</span>
+            <span class="day-title-text">Вторник</span>
+            <span class="day-date-sub" id="chip-date-2"></span>
           </button>
           <button class="day-chip" data-day="3">
             <span class="day-short">СР</span>
-            <span>Среда</span>
+            <span class="day-title-text">Среда</span>
+            <span class="day-date-sub" id="chip-date-3"></span>
           </button>
           <button class="day-chip" data-day="4">
             <span class="day-short">ЧТ</span>
-            <span>Четверг</span>
+            <span class="day-title-text">Четверг</span>
+            <span class="day-date-sub" id="chip-date-4"></span>
           </button>
           <button class="day-chip" data-day="5">
             <span class="day-short">ПТ</span>
-            <span>Пятница</span>
+            <span class="day-title-text">Пятница</span>
+            <span class="day-date-sub" id="chip-date-5"></span>
           </button>
           <button class="day-chip" data-day="6">
             <span class="day-short">СБ</span>
-            <span>Суббота</span>
+            <span class="day-title-text">Суббота</span>
+            <span class="day-date-sub" id="chip-date-6"></span>
           </button>
           <button class="day-chip" data-day="all">
             <span class="day-short">ВСЕ</span>
-            <span>Вся неделя</span>
+            <span class="day-title-text">Вся неделя</span>
+            <span class="day-date-sub">Все дни</span>
           </button>
         </div>
 
-        <!-- Filter & Search Toolbar -->
+        <!-- Filter, Date Picker & Current Week Toolbar -->
         <div class="filter-row">
           <div class="search-box">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -175,17 +261,34 @@
             <input type="text" id="searchInput" placeholder="Поиск предмета, преподавателя, аудитории, адреса...">
           </div>
 
-          <div class="week-selector">
-            <span>Неделя:</span>
-            <select id="weekFilterSelect" class="select-dropdown">
-              <option value="all">Все недели (обе)</option>
-              <option value="numerator">Числитель (нечетная / черным)</option>
-              <option value="denominator">Знаменатель (четная / синим)</option>
-              <option value="current">Текущая неделя (авто)</option>
-            </select>
+          <div class="date-picker-box" title="Выбрать конкретный день и дату">
+            <label for="dayDatePicker" class="date-picker-label">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+              <span>Дата:</span>
+            </label>
+            <input type="date" id="dayDatePicker" class="date-picker-input">
           </div>
 
-          <div style="display: flex; gap: 0.5rem;">
+          <!-- Current Week Indicator (Automatically selected) -->
+          <div class="current-week-badge" id="currentWeekIndicator">
+            <span class="week-badge-dot"></span>
+            <span id="currentWeekBadgeText">Загрузка недели...</span>
+          </div>
+
+          <div class="toolbar-actions">
+            <button id="exportIcsBtn" class="btn btn-secondary" title="Скачать календарь (.ics) для Apple Календаря, Google, Яндекс и Outlook">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Экспорт .ics</span>
+            </button>
             <button id="addLessonBtn" class="btn btn-primary" title="Добавить новое занятие в расписание">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -193,7 +296,7 @@
               </svg>
               <span>+ Добавить пару</span>
             </button>
-            <button id="resetScheduleBtn" class="btn btn-ghost" title="Сбросить изменения расписания к исходному" style="font-size:0.8rem; padding:0.4rem 0.6rem; color:var(--text-muted);">
+            <button id="resetScheduleBtn" class="btn btn-ghost" title="Сбросить изменения расписания к исходному">
               Сброс
             </button>
           </div>
@@ -212,7 +315,7 @@
         <div class="tasks-header">
           <div>
             <h2>Заметки и Домашние задания</h2>
-            <p class="brand-sub">Сохраняются в вашей учетной записи и синхронизируются с расписанием</p>
+            <p class="brand-sub">Общие задания группы бТИИ-262 • Личные отметки выполнения и заметки к парам</p>
           </div>
           <button id="openAddTaskModalBtn" class="btn btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -549,6 +652,9 @@
         <div class="form-group">
           <label class="form-label">Ваша персональная заметка:</label>
           <textarea id="noteContentInput" class="form-input" rows="4" placeholder="Ссылки на материалы, важные дедлайны, критерии зачета..."></textarea>
+          <span class="form-hint" id="noteSyncHint" style="display: flex; align-items: center; gap: 0.35rem; margin-top: 0.25rem;">
+            💾 Заметка мгновенно сохраняется в браузере (доступна офлайн)
+          </span>
         </div>
 
         <div class="modal-footer">
@@ -657,7 +763,30 @@
 
         <div class="form-group">
           <label class="form-label">Предмет / Дисциплина:</label>
-          <input type="text" id="editLessonSubject" class="form-input" placeholder="Физика, Высшая математика..." required list="subjectsList">
+          <select id="subjectTemplateSelect" class="form-input template-select">
+            <option value="">📋 Выбрать из списка предметов (шаблоны)...</option>
+            <option value="Основы программирования и алгоритмизации">Основы программирования и алгоритмизации</option>
+            <option value="Архитектура и организация ЭВМ">Архитектура и организация ЭВМ</option>
+            <option value="Физика">Физика</option>
+            <option value="Математика">Математика</option>
+            <option value="Иностранный язык">Иностранный язык</option>
+            <option value="Основы российской государственности">Основы российской государственности</option>
+            <option value="История России">История России</option>
+            <option value="Русский язык и деловое общение">Русский язык и деловое общение</option>
+            <option value="Элективные дисциплины по физической культуре и спорту">Элективные дисциплины по физической культуре и спорту</option>
+            <option value="Физическая культура и спорт">Физическая культура и спорт</option>
+          </select>
+          <div class="template-chips-row" id="subjectChipsRow">
+            <button type="button" class="template-chip" data-val="Физика">Физика</button>
+            <button type="button" class="template-chip" data-val="Математика">Математика</button>
+            <button type="button" class="template-chip" data-val="Основы программирования и алгоритмизации">Программирование</button>
+            <button type="button" class="template-chip" data-val="Архитектура и организация ЭВМ">ЭВМ</button>
+            <button type="button" class="template-chip" data-val="Иностранный язык">Ин. яз</button>
+            <button type="button" class="template-chip" data-val="История России">История</button>
+            <button type="button" class="template-chip" data-val="Основы российской государственности">ОРГ</button>
+            <button type="button" class="template-chip" data-val="Русский язык и деловое общение">Рус. яз</button>
+          </div>
+          <input type="text" id="editLessonSubject" class="form-input" placeholder="Или начните вводить название предмета..." required list="subjectsList">
           <datalist id="subjectsList">
             <option value="Основы программирования и алгоритмизации">
             <option value="Архитектура и организация ЭВМ">
@@ -710,8 +839,30 @@
 
         <div class="form-group">
           <label class="form-label">Адрес корпуса университета:</label>
-          <input type="text" id="editLessonAddress" class="form-input" placeholder="Определяется автоматически по аудитории">
-          <span class="form-hint" id="editLessonAddressHint">Подсказка: /1 — Московский просп., 14; /2 — Плехановская ул., 11; без слэша — ул. 20-летия Октября, 84</span>
+          <select id="addressTemplateSelect" class="form-input template-select">
+            <option value="">🏢 Выбрать адрес из списка корпусов...</option>
+            <option value="ул. 20-летия Октября, 84 (Главный корпус)">ул. 20-летия Октября, 84 (Главный корпус)</option>
+            <option value="Московский просп., 14 (Корпус 1)">Московский просп., 14 (Корпус 1)</option>
+            <option value="Плехановская ул., 11 (Корпус 2)">Плехановская ул., 11 (Корпус 2)</option>
+            <option value="Московский просп., 14 (Корпус 5)">Московский просп., 14 (Корпус 5)</option>
+            <option value="Дистанционно / Онлайн">Дистанционно / Онлайн</option>
+          </select>
+          <div class="template-chips-row" id="addressChipsRow">
+            <button type="button" class="template-chip" data-val="ул. 20-летия Октября, 84 (Главный корпус)">Главный корпус</button>
+            <button type="button" class="template-chip" data-val="Московский просп., 14 (Корпус 1)">Корпус 1 (/1)</button>
+            <button type="button" class="template-chip" data-val="Плехановская ул., 11 (Корпус 2)">Корпус 2 (/2)</button>
+            <button type="button" class="template-chip" data-val="Московский просп., 14 (Корпус 5)">Корпус 5 (/5)</button>
+            <button type="button" class="template-chip" data-val="Дистанционно / Онлайн">Онлайн</button>
+          </div>
+          <input type="text" id="editLessonAddress" class="form-input" placeholder="Определяется автоматически или выберите из списка выше" list="addressesList">
+          <datalist id="addressesList">
+            <option value="ул. 20-летия Октября, 84 (Главный корпус)">
+            <option value="Московский просп., 14 (Корпус 1)">
+            <option value="Плехановская ул., 11 (Корпус 2)">
+            <option value="Московский просп., 14 (Корпус 5)">
+            <option value="Дистанционно / Онлайн">
+          </datalist>
+          <span class="form-hint" id="editLessonAddressHint">Подсказка: /1 — Корпус 1; /2 — Корпус 2; /5 — Корпус 5; без слэша — Главный корпус</span>
         </div>
 
         <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0.75rem;">
@@ -731,6 +882,16 @@
           <input type="text" id="editLessonWeeks" class="form-input" placeholder="напр: 3, 7, 11, 15 нед.">
         </div>
 
+        <div id="editLessonCancelGroup" class="form-group" style="display: none; padding: 0.75rem; background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px dashed var(--border-color);">
+          <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; gap: 0.5rem;">
+            <div>
+              <strong id="editLessonCancelLabel" style="font-size: 0.88rem; color: #ef4444; display: block;">🚫 Отменить пару на этой неделе</strong>
+              <span id="editLessonCancelSub" style="font-size: 0.78rem; color: var(--text-muted);">Пара станет серой и будет помечена как отмененная только на текущей неделе</span>
+            </div>
+            <input type="checkbox" id="editLessonCancelCheckbox" style="width: 20px; height: 20px; cursor: pointer; accent-color: #ef4444;">
+          </label>
+        </div>
+
         <div class="modal-footer" style="justify-content: space-between; margin-top: 0.5rem;">
           <button type="button" id="deleteLessonBtn" class="btn" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3); display: none;">
             Удалить пару
@@ -744,14 +905,64 @@
     </div>
   </div>
 
+  <!-- Mobile Bottom Navigation Bar (iOS / Modern WebApp for screens <= 768px) -->
+  <nav class="mobile-bottom-nav" id="mobileBottomNav" aria-label="Быстрая мобильная навигация">
+    <button class="bottom-nav-item active" data-tab="schedule">
+      <div class="bottom-nav-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+      </div>
+      <span class="bottom-nav-label">Расписание</span>
+    </button>
+
+    <button class="bottom-nav-item" data-tab="tasks">
+      <div class="bottom-nav-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+        <span class="bottom-nav-badge" id="mobileTasksBadge" style="display: none;">0</span>
+      </div>
+      <span class="bottom-nav-label">Заметки / ДЗ</span>
+    </button>
+
+    <button class="bottom-nav-item" data-tab="students">
+      <div class="bottom-nav-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+      </div>
+      <span class="bottom-nav-label">Группа</span>
+    </button>
+
+    <button class="bottom-nav-item" data-tab="bells">
+      <div class="bottom-nav-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+      </div>
+      <span class="bottom-nav-label">Звонки</span>
+    </button>
+  </nav>
+
   <!-- Toast notifications container -->
   <div id="toastContainer" class="toast-container"></div>
 
   <!-- Application Scripts -->
-  <script src="/static/js/auth.js?v=2.2"></script>
-  <script src="/static/js/app.js?v=2.2"></script>
-  <script src="/static/js/schedule.js?v=2.2"></script>
-  <script src="/static/js/tasks.js?v=2.2"></script>
+  <script src="/static/js/auth.js?v=3.0"></script>
+  <script src="/static/js/app.js?v=3.0"></script>
+  <script src="/static/js/schedule.js?v=3.0"></script>
+  <script src="/static/js/tasks.js?v=3.0"></script>
 </body>
 </html>
 

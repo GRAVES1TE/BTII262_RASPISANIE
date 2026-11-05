@@ -6,8 +6,28 @@ const Auth = {
   currentUser: null,
   studentsList: [],
 
-  async init() {
+  initSync() {
     this.bindEvents();
+
+    // 0 ms instant render from cached students and user profile
+    try {
+      const cachedStudents = localStorage.getItem('btii_students_cache');
+      if (cachedStudents) {
+        this.studentsList = JSON.parse(cachedStudents);
+        this.populateStudentPicker();
+      }
+      const cachedUser = localStorage.getItem('btii_user_cache');
+      if (cachedUser) {
+        this.currentUser = JSON.parse(cachedUser);
+        this.updateAuthUI();
+      }
+    } catch (e) {
+      console.warn('Auth cache parse error', e);
+    }
+  },
+
+  async init() {
+    this.initSync();
     await this.fetchStudents();
     await this.checkAuth();
   },
@@ -18,7 +38,11 @@ const Auth = {
       if (res.ok) {
         const data = await res.json();
         this.studentsList = data.students || [];
+        localStorage.setItem('btii_students_cache', JSON.stringify(this.studentsList));
         this.populateStudentPicker();
+        if (window.App && typeof App.renderStudentsDirectory === 'function') {
+          App.renderStudentsDirectory();
+        }
       }
     } catch (e) {
       console.warn('Could not fetch students list', e);
@@ -66,6 +90,7 @@ const Auth = {
       const data = await res.json();
       if (data.authenticated && data.user) {
         this.currentUser = data.user;
+        localStorage.setItem('btii_user_cache', JSON.stringify(this.currentUser));
         this.updateAuthUI();
 
         // Apply user's saved preferences
@@ -77,12 +102,11 @@ const Auth = {
         }
       } else {
         this.currentUser = null;
+        localStorage.removeItem('btii_user_cache');
         this.updateAuthUI();
       }
     } catch (err) {
-      console.error('Check auth error', err);
-      this.currentUser = null;
-      this.updateAuthUI();
+      console.warn('Check auth network error (offline mode)', err);
     }
   },
 
@@ -214,6 +238,7 @@ const Auth = {
       try {
         await fetch('/api/logout', { method: 'POST' });
         this.currentUser = null;
+        localStorage.removeItem('btii_user_cache');
         this.updateAuthUI();
         App.closeModal(profileModal);
         App.showToast('Вы вышли из учетной записи', 'success');

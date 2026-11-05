@@ -1,0 +1,29 @@
+{
+  "name": "Расписание бТИИ-262",
+  "short_name": "бТИИ-262",
+  "description": "Интерактивное расписание занятий и домашних заданий группы бТИИ-262",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0f17",
+  "theme_color": "#0284c7",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": [
+    "education",
+    "productivity"
+  ]
+}

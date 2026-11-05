@@ -1,16 +1,64 @@
 // ==========================================================================
-// Tasks & Personal Notes Management Module
+// Tasks & Personal Notes Management Module (Hybrid Local & Cloud Mode)
 // ==========================================================================
 
 const Tasks = {
   tasksList: [],
   userNotes: {},
+  localNotes: {},
+  localCompletedTasks: {},
   currentNoteLessonId: null,
 
-  async init() {
+  initSync() {
+    this.loadLocalStorageData();
     this.bindEvents();
+
+    // 0 ms instant render from cached data
+    const cachedTasks = localStorage.getItem('btii_tasks_cache');
+    if (cachedTasks) {
+      try {
+        this.tasksList = JSON.parse(cachedTasks);
+        this.renderTasks();
+        this.updateBadge();
+      } catch (e) {
+        console.warn('Corrupt tasks cache', e);
+      }
+    }
+  },
+
+  async init() {
+    this.initSync();
     await this.loadNotes();
     await this.loadTasks();
+  },
+
+  loadLocalStorageData() {
+    try {
+      this.localNotes = JSON.parse(localStorage.getItem('btii_personal_notes') || '{}');
+      this.localCompletedTasks = JSON.parse(localStorage.getItem('btii_local_completed_tasks') || '{}');
+    } catch (e) {
+      this.localNotes = {};
+      this.localCompletedTasks = {};
+    }
+  },
+
+  isTaskCompleted(task) {
+    if (!task) return false;
+    if (Object.prototype.hasOwnProperty.call(this.localCompletedTasks, task.id)) {
+      return Boolean(this.localCompletedTasks[task.id]);
+    }
+    return false;
+  },
+
+  getNote(lessonId) {
+    if (!lessonId) return '';
+    if (this.localNotes && this.localNotes[lessonId]) {
+      return this.localNotes[lessonId];
+    }
+    if (this.userNotes && this.userNotes[lessonId]) {
+      return this.userNotes[lessonId];
+    }
+    return '';
   },
 
   async loadTasks() {
@@ -19,35 +67,50 @@ const Tasks = {
       if (res.ok) {
         const data = await res.json();
         this.tasksList = data.tasks || [];
+        localStorage.setItem('btii_tasks_cache', JSON.stringify(this.tasksList));
         this.renderTasks();
         this.updateBadge();
       }
     } catch (e) {
-      console.warn('Could not load tasks', e);
+      console.warn('Could not load tasks from network, using cache', e);
     }
   },
 
   async loadNotes() {
-    try {
-      const res = await fetch('/api/notes');
-      if (res.ok) {
-        const data = await res.json();
-        this.userNotes = data.notes || {};
-        if (window.Schedule && Schedule.rawSchedule) {
-          Schedule.render();
+    // If user is logged in, fetch server notes
+    if (window.Auth && Auth.currentUser) {
+      try {
+        const res = await fetch('/api/notes');
+        if (res.ok) {
+          const data = await res.json();
+          this.userNotes = data.notes || {};
+          // Sync server notes into local notes as baseline
+          Object.assign(this.localNotes, this.userNotes);
+          localStorage.setItem('btii_personal_notes', JSON.stringify(this.localNotes));
         }
+      } catch (e) {
+        console.warn('Could not load server notes, using local', e);
       }
-    } catch (e) {
-      console.warn('Could not load notes', e);
+    }
+
+    if (window.Schedule && Schedule.rawSchedule) {
+      Schedule.render();
     }
   },
 
   updateBadge() {
     const badge = document.getElementById('tasksCountBadge');
-    if (!badge) return;
-    const activeTasksCount = this.tasksList.filter(t => !t.is_completed).length;
-    badge.textContent = activeTasksCount;
-    badge.style.display = activeTasksCount > 0 ? 'inline-block' : 'none';
+    const mobileBadge = document.getElementById('mobileTasksBadge');
+    const activeTasksCount = this.tasksList.filter(t => !this.isTaskCompleted(t)).length;
+
+    if (badge) {
+      badge.textContent = activeTasksCount;
+      badge.style.display = activeTasksCount > 0 ? 'inline-block' : 'none';
+    }
+    if (mobileBadge) {
+      mobileBadge.textContent = activeTasksCount;
+      mobileBadge.style.display = activeTasksCount > 0 ? 'inline-block' : 'none';
+    }
   },
 
   renderTasks() {
@@ -73,8 +136,9 @@ const Tasks = {
     }
 
     this.tasksList.forEach(task => {
+      const isDone = this.isTaskCompleted(task);
       const card = document.createElement('div');
-      card.className = `task-card ${task.is_completed ? 'completed' : ''}`;
+      card.className = `task-card ${isDone ? 'completed' : ''}`;
       card.dataset.taskId = task.id;
 
       let dueDateHtml = '';
@@ -96,8 +160,8 @@ const Tasks = {
         <div class="task-top">
           <span class="task-subject">${this.escapeHtml(task.subject)}</span>
           <div class="task-actions">
-            <button class="btn btn-icon btn-ghost btn-delete-task" title="Удалить задание" style="width:28px; height:28px;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <button class="btn btn-icon btn-ghost btn-delete-task" title="Удалить задание (для старостата)" style="width:44px; height:44px; display:inline-flex; align-items:center; justify-content:center;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
@@ -106,8 +170,8 @@ const Tasks = {
         </div>
 
         <div class="task-body">
-          <div class="task-checkbox" title="${task.is_completed ? 'Снять отметку' : 'Отметить выполненным'}">
-            ${task.is_completed ? '✓' : ''}
+          <div class="task-checkbox" title="${isDone ? 'Снять отметку' : 'Отметить выполненным'}">
+            <div class="task-checkbox-box">${isDone ? '✓' : ''}</div>
           </div>
           <div style="flex:1; display:flex; flex-direction:column; gap:0.4rem;">
             <p class="task-text">${this.escapeHtml(task.title)}</p>
@@ -118,7 +182,7 @@ const Tasks = {
 
       // Checkbox toggle event
       card.querySelector('.task-checkbox').addEventListener('click', () => {
-        this.toggleTask(task.id, !task.is_completed);
+        this.toggleTask(task.id, !isDone);
       });
 
       // Delete task event
@@ -132,21 +196,12 @@ const Tasks = {
   },
 
   async toggleTask(taskId, isCompleted) {
-    try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_completed: isCompleted ? 1 : 0 })
-      });
-      if (res.ok) {
-        const item = this.tasksList.find(t => t.id === taskId);
-        if (item) item.is_completed = isCompleted ? 1 : 0;
-        this.renderTasks();
-        this.updateBadge();
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    // 1. Immediately toggle in localStorage for instant personal response (0 ms)
+    this.localCompletedTasks[taskId] = isCompleted;
+    localStorage.setItem('btii_local_completed_tasks', JSON.stringify(this.localCompletedTasks));
+
+    this.renderTasks();
+    this.updateBadge();
   },
 
   deleteTask(taskId) {
@@ -169,6 +224,9 @@ const Tasks = {
       });
       if (res.ok) {
         this.tasksList = this.tasksList.filter(t => t.id !== taskId);
+        delete this.localCompletedTasks[taskId];
+        localStorage.setItem('btii_local_completed_tasks', JSON.stringify(this.localCompletedTasks));
+        localStorage.setItem('btii_tasks_cache', JSON.stringify(this.tasksList));
         this.renderTasks();
         this.updateBadge();
         App.showToast('Задание удалено', 'success');
@@ -204,7 +262,6 @@ const Tasks = {
     dueDateInput.value = '';
 
     if (subject) {
-      // Find matching option or set value
       let found = false;
       for (const opt of subjectSelect.options) {
         if (opt.value === subject || subject.includes(opt.value)) {
@@ -220,23 +277,29 @@ const Tasks = {
   },
 
   openNoteModal(lessonId, subject, teacher) {
-    if (!Auth.currentUser) {
-      App.showToast('Авторизуйтесь, чтобы сохранять личные заметки', 'error');
-      App.openModal(document.getElementById('authModal'));
-      return;
-    }
-
     this.currentNoteLessonId = lessonId;
     const modal = document.getElementById('noteModal');
     const titleEl = document.getElementById('noteModalTitle');
     const infoEl = document.getElementById('noteLessonInfo');
     const textInput = document.getElementById('noteContentInput');
+    const hintEl = document.getElementById('noteSyncHint');
 
-    titleEl.textContent = `Заметка к паре`;
-    infoEl.textContent = `${subject} (${teacher})`;
-    textInput.value = this.userNotes[lessonId] || '';
+    if (titleEl) titleEl.textContent = 'Личная заметка к занятию';
+    if (infoEl) infoEl.textContent = `${subject} (${teacher || 'преподаватель не указан'})`;
+
+    const existingNote = this.getNote(lessonId);
+    if (textInput) textInput.value = existingNote;
+
+    if (hintEl) {
+      if (window.Auth && Auth.currentUser) {
+        hintEl.innerHTML = '☁️ Заметка сохраняется в браузере и синхронизируется с вашим профилем';
+      } else {
+        hintEl.innerHTML = '💾 Заметка мгновенно сохраняется в браузере (доступна офлайн, вход не требуется)';
+      }
+    }
 
     App.openModal(modal);
+    setTimeout(() => textInput?.focus(), 100);
   },
 
   bindEvents() {
@@ -264,6 +327,7 @@ const Tasks = {
         const data = await res.json();
         if (res.ok && data.task) {
           this.tasksList.unshift(data.task);
+          localStorage.setItem('btii_tasks_cache', JSON.stringify(this.tasksList));
           this.renderTasks();
           this.updateBadge();
           App.closeModal(document.getElementById('taskModal'));
@@ -282,36 +346,47 @@ const Tasks = {
     // Save lesson note button
     document.getElementById('saveNoteBtn')?.addEventListener('click', async () => {
       if (!this.currentNoteLessonId) return;
-      const content = document.getElementById('noteContentInput').value.trim();
+      const lessonId = this.currentNoteLessonId;
+      const content = (document.getElementById('noteContentInput')?.value || '').trim();
 
-      try {
-        const res = await fetch('/api/notes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lesson_id: this.currentNoteLessonId, content })
-        });
-        if (res.ok) {
-          if (content) {
-            this.userNotes[this.currentNoteLessonId] = content;
-          } else {
-            delete this.userNotes[this.currentNoteLessonId];
-          }
+      // 1. Immediately save to localStorage (0 ms, works offline, works for guest students!)
+      if (content) {
+        this.localNotes[lessonId] = content;
+      } else {
+        delete this.localNotes[lessonId];
+      }
+      localStorage.setItem('btii_personal_notes', JSON.stringify(this.localNotes));
 
-          // Update preview in DOM
-          const previewEl = document.getElementById(`note-preview-${this.currentNoteLessonId}`);
-          if (previewEl) {
-            previewEl.innerHTML = content
-              ? `📝 ${this.escapeHtml(content)}`
-              : '<span style="color:var(--text-muted);">Нет личных заметок</span>';
-          }
+      // Update preview in DOM
+      const previewEl = document.getElementById(`note-preview-${lessonId}`);
+      if (previewEl) {
+        previewEl.innerHTML = content
+          ? `📝 ${this.escapeHtml(content)}`
+          : '<span style="color:var(--text-muted);">Нет личных заметок</span>';
+      }
 
-          App.closeModal(document.getElementById('noteModal'));
-          App.showToast('Заметка сохранена!', 'success');
-        } else {
-          App.showToast('Ошибка сохранения заметки', 'error');
+      App.closeModal(document.getElementById('noteModal'));
+      App.showToast('Заметка сохранена!', 'success');
+
+      // 2. If authenticated, sync with server in background
+      if (window.Auth && Auth.currentUser) {
+        try {
+          fetch('/api/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lesson_id: lessonId, content })
+          }).then(res => {
+            if (res.ok) {
+              if (content) {
+                this.userNotes[lessonId] = content;
+              } else {
+                delete this.userNotes[lessonId];
+              }
+            }
+          }).catch(() => {});
+        } catch (err) {
+          // Ignore background sync errors
         }
-      } catch (err) {
-        App.showToast('Ошибка сохранения заметки', 'error');
       }
     });
   },
